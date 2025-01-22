@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Three.js Orrery</title>
+  <!-- Load Three.js from CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
+  <!-- Orbit Controls (for mouse interaction) -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/examples/js/controls/OrbitControls.js"></script>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background-color: #000;
+      font-family: sans-serif;
+      user-select: none;
+    }
+    #canvas-container {
+      width: 100vw;
+      height: 100vh;
+      position: relative;
+    }
+    #slider-container {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 300px;
+      color: #fff;
+      text-align: center;
+    }
+    input[type="range"] {
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+<div id="canvas-container"></div>
+
+<div id="slider-container">
+  <div>Orbital Speed</div>
+  <input id="speedSlider" type="range" min="-5" max="5" step="0.1" value="1" />
+</div>
+
+<script>
+  // -----------------------------------------------------
+  // SCENE, CAMERA & RENDERER
+  // -----------------------------------------------------
+  const container = document.getElementById('canvas-container');
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x000000);
+
+  // Camera: perspective
+  const camera = new THREE.PerspectiveCamera(
+    60, 
+    window.innerWidth / window.innerHeight, 
+    0.1, 
+    10000
+  );
+  camera.position.set(0, 100, 300);
+
+  // WebGL Renderer
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  container.appendChild(renderer.domElement);
+
+  // OrbitControls for interactive rotation/zoom
+  const controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.1;
+  controls.minDistance = 50;
+  controls.maxDistance = 1500;
+
+  // Handle window resize
+  window.addEventListener('resize', onWindowResize, false);
+  function onWindowResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+
+  // -----------------------------------------------------
+  // LIGHTING
+  // -----------------------------------------------------
+  // A point light at the center for the Sun
+  const pointLight = new THREE.PointLight(0xffffff, 2, 0, 2);
+  pointLight.position.set(0, 0, 0);
+  scene.add(pointLight);
+
+  // Add a dim ambient light for subtle global lighting
+  const ambientLight = new THREE.AmbientLight(0x222222);
+  scene.add(ambientLight);
+
+  // -----------------------------------------------------
+  // TEXTURES/BACKGROUND (OPTIONAL STARFIELD)
+  // -----------------------------------------------------
+  // You can optionally add a starfield background using a large sphere
+  // with an inverted (flipped) geometry. We'll skip an external texture 
+  // to keep it self-contained and stay minimal. 
+  // However, the code structure is here if you'd like to use your own star texture.
+  /*
+  new THREE.TextureLoader().load('PATH_TO/starfield.jpg', function(starTexture) {
+    const starGeo = new THREE.SphereGeometry(4000, 32, 32);
+    const starMat = new THREE.MeshBasicMaterial({
+      map: starTexture,
+      side: THREE.BackSide
+    });
+    const starMesh = new THREE.Mesh(starGeo, starMat);
+    scene.add(starMesh);
+  });
+  */
+
+  // -----------------------------------------------------
+  // CREATE THE SUN
+  // -----------------------------------------------------
+  const sunSize = 20; // comedic scale
+  const sunGeometry = new THREE.SphereGeometry(sunSize, 32, 32);
+  const sunMaterial = new THREE.MeshStandardMaterial({
+    emissive: 0xffff00, 
+    emissiveIntensity: 1, 
+    color: 0xffaa00 
+  });
+  const sun = new THREE.Mesh(sunGeometry, sunMaterial);
+  scene.add(sun);
+
+  // -----------------------------------------------------
+  // PLANET DEFINITIONS
+  //
+  // radius:    orbital distance from Sun
+  // size:      comedic planet radius
+  // color:     planet color
+  // orbitSpeed factor for how quickly it completes its orbit
+  //
+  // The orbit speeds below are not real; they are purely for demonstration.
+  // -----------------------------------------------------
+  const planetsData = [
+    { name: 'Mercury', radius: 35,  size: 1.5,  color: 0xaaaaaa, orbitSpeed: 4.15 },
+    { name: 'Venus',   radius: 50,  size: 2.5,  color: 0xffcc66, orbitSpeed: 1.62 },
+    { name: 'Earth',   radius: 70,  size: 3,    color: 0x2266ff, orbitSpeed: 1.0  },
+    { name: 'Mars',    radius: 90,  size: 2.8,  color: 0xff4422, orbitSpeed: 0.53 },
+    { name: 'Jupiter', radius: 120, size: 8,    color: 0xff9966, orbitSpeed: 0.08 },
+    { name: 'Saturn',  radius: 150, size: 7,    color: 0xffee99, orbitSpeed: 0.03 },
+    { name: 'Uranus',  radius: 180, size: 5,    color: 0x66ccff, orbitSpeed: 0.01 },
+    { name: 'Neptune', radius: 210, size: 5,    color: 0x4444ff, orbitSpeed: 0.006 },
+    // Pluto is optional ;)
+    // { name: 'Pluto',   radius: 230, size: 1.2,  color: 0x888888, orbitSpeed: 0.004 },
+  ];
+
+  // -----------------------------------------------------
+  // CREATE PLANETS & ORBIT CIRCLES
+  // -----------------------------------------------------
+  const planets = [];
+  const orbitMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, opacity: 0.2, transparent: true });
+
+  planetsData.forEach((planetData) => {
+    // Planet mesh
+    const geometry = new THREE.SphereGeometry(planetData.size, 32, 32);
+    const material = new THREE.MeshStandardMaterial({
+      color: planetData.color,
+      roughness: 0.8,
+      metalness: 0.1
+    });
+    const planetMesh = new THREE.Mesh(geometry, material);
+
+    // Add custom properties for orbit
+    planetMesh.userData = {
+      radius: planetData.radius,
+      orbitSpeed: planetData.orbitSpeed
+    };
+
+    scene.add(planetMesh);
+    planets.push(planetMesh);
+
+    // Orbit path (circle)
+    const segments = 64;
+    const orbitGeometry = new THREE.BufferGeometry();
+    const orbitPositions = [];
+    for (let i = 0; i <= segments; i++) {
+      const theta = (i / segments) * Math.PI * 2;
+      orbitPositions.push(
+        Math.cos(theta) * planetData.radius, 
+        0, 
+        Math.sin(theta) * planetData.radius
+      );
+    }
+    orbitGeometry.setAttribute(
+      'position', 
+      new THREE.Float32BufferAttribute(orbitPositions, 3)
+    );
+    const orbitCircle = new THREE.LineLoop(orbitGeometry, orbitMaterial);
+    scene.add(orbitCircle);
+  });
+
+  // -----------------------------------------------------
+  // ANIMATION & TIME CONTROL
+  // -----------------------------------------------------
+  // We will track an internal "globalTime" that changes with the speed slider.
+  let globalTime = 0;
+  const clock = new THREE.Clock();
+
+  // Range slider to control orbital speed factor (can go negative)
+  const speedSlider = document.getElementById('speedSlider');
+
+  function animate() {
+    requestAnimationFrame(animate);
+
+    // Calculate the time delta from the clock
+    const delta = clock.getDelta();
+    // Read the slider’s speed factor
+    const speedFactor = parseFloat(speedSlider.value);
+
+    // Advance the global time according to the chosen speed factor
+    globalTime += delta * speedFactor;
+
+    // Update planet positions
+    planets.forEach((planet) => {
+      const { radius, orbitSpeed } = planet.userData;
+      // The angle is a simple function of globalTime
+      const angle = globalTime * orbitSpeed;
+      planet.position.set(
+        Math.cos(angle) * radius,
+        0,
+        Math.sin(angle) * radius
+      );
+    });
+
+    // Update controls
+    controls.update();
+
+    // Render the scene
+    renderer.render(scene, camera);
+  }
+
+  animate();
+</script>
+</body>
+</html>

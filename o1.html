@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Three.js Orrery</title>
+  <!-- Load Three.js from a CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.min.js"></script>
+  <!-- Optional: Use OrbitControls for camera navigation -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.153.0/examples/js/controls/OrbitControls.js"></script>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background-color: #000; /* black background for outer space */
+    }
+    #sliderContainer {
+      position: absolute;
+      top: 10px;
+      width: 100%;
+      display: flex;
+      justify-content: center;
+      z-index: 9999;
+    }
+    #speedSlider {
+      width: 300px;
+    }
+  </style>
+</head>
+<body>
+<div id="sliderContainer">
+  <input
+    type="range"
+    id="speedSlider"
+    min="-5"
+    max="5"
+    value="1"
+    step="0.1"
+  />
+</div>
+
+<script>
+  // ----------------------------------
+  // Global Setup
+  // ----------------------------------
+  let scene, camera, renderer, controls, clock;
+  let speedSlider;
+  const planetGroups = [];
+
+  function init() {
+    // Create scene
+    scene = new THREE.Scene();
+
+    // Create camera
+    camera = new THREE.PerspectiveCamera(
+      45,              // Field of view
+      window.innerWidth / window.innerHeight, // Aspect ratio
+      0.1,             // Near clipping
+      10000            // Far clipping
+    );
+    camera.position.set(0, 50, 200);
+
+    // Create renderer
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // Add orbit controls so we can look around
+    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+
+    // Add some lights
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.2);
+    scene.add(ambientLight);
+
+    // A point light at the center to mimic the Sun’s brightness
+    const pointLight = new THREE.PointLight(0xffffff, 2, 0);
+    pointLight.position.set(0, 0, 0);
+    scene.add(pointLight);
+
+    // Create the Sun
+    // Increase the radius a bit to make it prominent
+    const sunGeometry = new THREE.SphereGeometry(8, 32, 32);
+    const sunMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+    const sunMesh = new THREE.Mesh(sunGeometry, sunMaterial);
+    scene.add(sunMesh);
+
+    // Planet data: name, orbitRadius, size, color, orbitalPeriodInDays
+    // Distances and sizes are comedic, not to scale
+    const planetData = [
+      { name: "Mercury", orbitRadius: 20, size: 1.2, color: 0xb0b0b0, period: 88 },
+      { name: "Venus",   orbitRadius: 28, size: 2.5, color: 0xe0c080, period: 225 },
+      { name: "Earth",   orbitRadius: 36, size: 2.8, color: 0x3366ff, period: 365 },
+      { name: "Mars",    orbitRadius: 46, size: 2.0, color: 0xff3300, period: 687 },
+      { name: "Jupiter", orbitRadius: 60, size: 7.0, color: 0xffa500, period: 4333 },
+      { name: "Saturn",  orbitRadius: 75, size: 6.0, color: 0xffdd99, period: 10759 },
+      { name: "Uranus",  orbitRadius: 90, size: 5.5, color: 0x99ffff, period: 30687 },
+      { name: "Neptune", orbitRadius: 105, size: 5.2, color: 0x3333ff, period: 60190 }
+    ];
+
+    // Add planets and orbits
+    planetData.forEach(data => {
+      const planetGroup = new THREE.Group(); // group that will rotate to revolve the planet
+      scene.add(planetGroup);
+
+      // Draw the orbit path (just a circular line)
+      const orbitCurve = new THREE.EllipseCurve(
+        0, 0,                    // ax, aY
+        data.orbitRadius, data.orbitRadius, // xRadius, yRadius
+        0, 2 * Math.PI,          // startAngle, endAngle
+        false,                   // clockwise
+        0
+      );
+      const orbitPoints = orbitCurve.getPoints(100);
+      const orbitGeometry = new THREE.BufferGeometry().setFromPoints(orbitPoints.map(p => new THREE.Vector3(p.x, 0, p.y)));
+      const orbitMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, opacity: 0.6, transparent: true });
+      const orbitLine = new THREE.LineLoop(orbitGeometry, orbitMaterial);
+
+      // Slight tilt
+      orbitLine.rotation.x = Math.PI / 2;
+      planetGroup.add(orbitLine);
+
+      // Create planet
+      const geometry = new THREE.SphereGeometry(data.size, 32, 32);
+      const material = new THREE.MeshPhongMaterial({ color: data.color });
+      const planetMesh = new THREE.Mesh(geometry, material);
+
+      // Position it along the orbit radius
+      // We'll place it initially at some angle offset
+      planetMesh.position.set(data.orbitRadius, 0, 0);
+
+      planetGroup.add(planetMesh);
+
+      // Store data for use in the animation loop
+      planetGroups.push({
+        group: planetGroup,
+        orbitRadius: data.orbitRadius,
+        orbitalPeriod: data.period,
+        mesh: planetMesh
+      });
+    });
+
+    // Create a background starfield (optional, large sphere)
+    const starGeometry = new THREE.SphereGeometry(3000, 64, 64);
+    // Use a darker material so stars show faintly
+    const starMaterial = new THREE.MeshBasicMaterial({
+      map: null,
+      side: THREE.BackSide
+    });
+    const starMesh = new THREE.Mesh(starGeometry, starMaterial);
+    scene.add(starMesh);
+
+    // Create a clock to track time
+    clock = new THREE.Clock();
+
+    // Grab the slider
+    speedSlider = document.getElementById("speedSlider");
+
+    // Resize handling
+    window.addEventListener("resize", onWindowResize, false);
+  }
+
+  function onWindowResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+
+  // ----------------------------------
+  // Animation Loop
+  // ----------------------------------
+  function animate() {
+    requestAnimationFrame(animate);
+
+    controls.update();
+
+    // Delta time since last frame
+    const delta = clock.getDelta();
+    // Slider controls the multiplier for orbital speed
+    const speedMultiplier = parseFloat(speedSlider.value);
+
+    // For each planet group, rotate it around the y-axis to simulate orbits
+    planetGroups.forEach(obj => {
+      // fraction of orbit per second: (2π / period_in_seconds)
+      // but we'll do a simplified approach: period_in_days -> period_in_seconds is not literal
+      // We'll just do 1 day = 1 second for demonstration, so orbital speed = 2π / period * dt
+      const anglePerSecond = (2 * Math.PI) / obj.orbitalPeriod;
+      // Multiply by delta, then by the speed from the slider
+      const angleChange = anglePerSecond * delta * speedMultiplier;
+      obj.group.rotation.y += angleChange;
+    });
+
+    renderer.render(scene, camera);
+  }
+
+  // ----------------------------------
+  // Start it up
+  // ----------------------------------
+  init();
+  animate();
+</script>
+</body>
+</html>

@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Cosmic Orrery</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        canvas { display: block; }
+        #controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-family: Arial, sans-serif;
+        }
+        input[type="range"] { width: 200px; }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <label>Time Warp: <span id="speedValue">1x</span></label><br>
+        <input type="range" id="timeSpeed" min="-10" max="10" value="1">
+    </div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+<script>
+    let timeMultiplier = 1;
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setClearColor(0x000033);
+    document.body.appendChild(renderer.domElement);
+
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    camera.position.set(0, 50, 100);
+    controls.update();
+
+    // Stars background
+    const starsGeometry = new THREE.BufferGeometry();
+    const starVertices = [];
+    for(let i=0; i<1000; i++) {
+        starVertices.push(
+            THREE.MathUtils.randFloatSpread(1000),
+            THREE.MathUtils.randFloatSpread(1000),
+            THREE.MathUtils.randFloatSpread(1000)
+        );
+    }
+    starsGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starVertices, 3));
+    const stars = new THREE.Points(starsGeometry, new THREE.PointsMaterial({color: 0xFFFFFF}));
+    scene.add(stars);
+
+    // Sun
+    const sunGeometry = new THREE.SphereGeometry(8, 32, 32);
+    const sunMaterial = new THREE.MeshBasicMaterial({ color: 0xFFD700 });
+    const sun = new THREE.Mesh(sunGeometry, sunMaterial);
+    scene.add(sun);
+
+    // Planet factory
+    function createPlanet(color, size, radius, speed) {
+        return {
+            mesh: new THREE.Mesh(
+                new THREE.SphereGeometry(size),
+                new THREE.MeshPhongMaterial({ color, shininess: 100 })
+            ),
+            radius,
+            speed,
+            angle: Math.random() * Math.PI * 2
+        };
+    }
+
+    // Planets with exaggerated sizes and reasonable orbital distances
+    const planets = [
+        createPlanet(0xA0522D, 1.5, 20, 0.02),   // Mercury
+        createPlanet(0xFFA500, 2.2, 30, 0.015),  // Venus
+        createPlanet(0x4169E1, 2.5, 40, 0.01),    // Earth
+        createPlanet(0xFF4500, 1.8, 50, 0.008),  // Mars
+        createPlanet(0xDEB887, 4.5, 70, 0.004),  // Jupiter
+        createPlanet(0xF4A460, 4.0, 90, 0.002),  // Saturn
+        createPlanet(0x87CEEB, 3.0, 110, 0.001), // Uranus
+        createPlanet(0x4682B4, 3.0, 130, 0.0007) // Neptune
+    ];
+
+    // Create orbit paths
+    planets.forEach(planet => {
+        const orbitGeometry = new THREE.BufferGeometry();
+        const points = [];
+        for(let i=0; i <= 64; i++) {
+            const angle = (i / 64) * Math.PI * 2;
+            points.push(
+                new THREE.Vector3(
+                    Math.cos(angle) * planet.radius,
+                    0,
+                    Math.sin(angle) * planet.radius
+                )
+            );
+        }
+        orbitGeometry.setFromPoints(points);
+        const orbitLine = new THREE.Line(
+            orbitGeometry,
+            new THREE.LineBasicMaterial({ color: 0x444444 })
+        );
+        scene.add(orbitLine);
+        scene.add(planet.mesh);
+    });
+
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0xFFFFFF, 0.3);
+    scene.add(ambientLight);
+    const sunLight = new THREE.PointLight(0xFFD700, 1.5, 200);
+    sun.add(sunLight);
+
+    // Timeline controls
+    document.getElementById('timeSpeed').addEventListener('input', (e) => {
+        timeMultiplier = parseFloat(e.target.value);
+        document.getElementById('speedValue').textContent = `${timeMultiplier}x`;
+    });
+
+    // Animation loop
+    function animate() {
+        requestAnimationFrame(animate);
+        
+        const time = Date.now() * 0.001;
+        
+        planets.forEach(planet => {
+            planet.angle += planet.speed * timeMultiplier;
+            planet.mesh.position.x = Math.cos(planet.angle) * planet.radius;
+            planet.mesh.position.z = Math.sin(planet.angle) * planet.radius;
+            planet.mesh.rotation.y += 0.02;
+        });
+
+        renderer.render(scene, camera);
+    }
+
+    // Handle window resize
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    animate();
+</script>
+</body>
+</html>
