@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Three.js Orrery</title>
+    <style>
+        body { margin: 0; }
+        canvas { display: block; }
+        #gui { position: absolute; top: 10px; left: 10px; }
+    </style>
+</head>
+<body>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dat.gui@0.7.7/build/dat.gui.min.js"></script>
+
+<script>
+// Scientific constants (scaled down 1:1 billion)
+const AU = 149.6; // 1 Astronomical Unit = 149.6 units
+const PLANET_DATA = [
+    { name: 'Mercury', radius: 2440/50000, distance: 0.387*AU, color: 0xBBBBBB, period: 87.97 },
+    { name: 'Venus', radius: 6052/30000, distance: 0.723*AU, color: 0xFFE4B2, period: 224.70 },
+    { name: 'Earth', radius: 6371/25000, distance: 1*AU, color: 0x4169E1, period: 365.25 },
+    { name: 'Mars', radius: 3390/20000, distance: 1.524*AU, color: 0xCD5C5C, period: 686.98 },
+    { name: 'Jupiter', radius: 69911/5000, distance: 5.203*AU, color: 0xDAA06D, period: 4332.82 },
+    { name: 'Saturn', radius: 58232/5000, distance: 9.555*AU, color: 0xF4A460, period: 10775.6 },
+    { name: 'Uranus', radius: 25362/5000, distance: 19.218*AU, color: 0x87CEEB, period: 30687.2 },
+    { name: 'Neptune', radius: 24622/5000, distance: 30.11*AU, color: 0x4682B4, period: 60190.0 }
+];
+
+let scene, camera, renderer, controls, gui;
+let timeScale = 1;
+let planets = [];
+
+init();
+animate();
+
+function init() {
+    // Scene setup
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // Lighting
+    const light = new THREE.PointLight(0xFFFFFF, 1.5);
+    light.position.set(0, 0, 0);
+    scene.add(light);
+    scene.add(new THREE.AmbientLight(0x404040));
+
+    // Sun
+    const sunGeometry = new THREE.SphereGeometry(5, 32, 32);
+    const sunMaterial = new THREE.MeshBasicMaterial({ color: 0xFFD700 });
+    const sun = new THREE.Mesh(sunGeometry, sunMaterial);
+    scene.add(sun);
+
+    // Create planets
+    PLANET_DATA.forEach(data => {
+        const planet = createPlanet(data);
+        planets.push(planet);
+        scene.add(planet.mesh);
+        scene.add(planet.orbit);
+    });
+
+    // Camera position
+    camera.position.z = 50;
+
+    // GUI controls
+    gui = new dat.GUI();
+    gui.add({ speed: 1 }, 'speed', 0, 1000).onChange(val => timeScale = val);
+}
+
+function createPlanet(data) {
+    // Planet mesh
+    const geometry = new THREE.SphereGeometry(data.radius, 32, 32);
+    const material = new THREE.MeshPhongMaterial({ color: data.color });
+    const mesh = new THREE.Mesh(geometry, material);
+    
+    // Orbit path
+    const orbitPoints = [];
+    const eccentricity = 0.0167; // Earth's eccentricity for example
+    for(let θ = 0; θ <= 2*Math.PI; θ += 0.01) {
+        const r = (data.distance * (1 - eccentricity**2)) / (1 + eccentricity * Math.cos(θ));
+        orbitPoints.push(new THREE.Vector3(r * Math.cos(θ), 0, r * Math.sin(θ)));
+    }
+    const orbitGeometry = new THREE.BufferGeometry().setFromPoints(orbitPoints);
+    const orbitLine = new THREE.Line(
+        orbitGeometry,
+        new THREE.LineBasicMaterial({ color: 0x444444 })
+    );
+    
+    return {
+        mesh: mesh,
+        orbit: orbitLine,
+        distance: data.distance,
+        period: data.period,
+        angle: Math.random() * Math.PI * 2
+    };
+}
+
+function animate() {
+    requestAnimationFrame(animate);
+    
+    // Update planet positions
+    const deltaTime = 0.016 * timeScale;
+    planets.forEach(planet => {
+        planet.angle += (Math.PI * 2) / (planet.period * 24) * deltaTime; // Hours per day factor
+        const x = planet.distance * Math.cos(planet.angle);
+        const z = planet.distance * Math.sin(planet.angle);
+        planet.mesh.position.set(x, 0, z);
+    });
+
+    renderer.render(scene, camera);
+}
+
+// Handle window resize
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>

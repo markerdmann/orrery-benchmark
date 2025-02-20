@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Three.js Orrery</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #000; }
+    #sliderContainer {
+      position: absolute;
+      top: 10px; left: 50%;
+      transform: translateX(-50%);
+      color: white;
+      font-family: sans-serif;
+      text-align: center;
+      width: 320px;
+    }
+    #timeSlider {
+      width: 200px;
+    }
+  </style>
+</head>
+<body>
+<div id="sliderContainer">
+  <div>Time Speed (<span id="speedLabel">1.0</span>x)</div>
+  <input type="range" id="timeSlider" min="-2" max="2" step="0.1" value="1">
+</div>
+<script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.152.2/examples/js/controls/OrbitControls.js"></script>
+<script>
+/*
+  Orrery with elliptical orbits, comedic scaling for planet sizes and distances,
+  and approximate orbital periods [3][4]. Each planet’s position is calculated
+  using parametric equations for elliptical orbits:
+    x = a * cos(θ), z = b * sin(θ)
+  where a is the semi-major axis, b = a * sqrt(1-e^2). θ advances each frame
+  based on the planet's orbital period. User can fast-forward or reverse time
+  with a slider.
+*/
+
+// ----------------- Basic Three.js Setup -----------------
+const scene = new THREE.Scene();
+scene.background = new THREE.Color("black");
+
+const camera = new THREE.PerspectiveCamera(
+  50, window.innerWidth / window.innerHeight, 0.1, 10000
+);
+camera.position.set(0, 50, 200);
+
+const renderer = new THREE.WebGLRenderer({antialias: true});
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.minDistance = 20;
+controls.maxDistance = 2000;
+
+// ----------------- A PointLight at Sun's Position -----------------
+const sunLight = new THREE.PointLight(0xffffff, 1.2, 0);
+sunLight.position.set(0,0,0);
+scene.add(sunLight);
+
+// ----------------- Starfield Background (Large Inverted Sphere) -----------------
+(() => {
+  const starGeometry = new THREE.SphereGeometry(4000, 32, 32);
+  const starMaterial = new THREE.MeshBasicMaterial({
+    map: createStarTexture(),
+    side: THREE.BackSide
+  });
+  const starSphere = new THREE.Mesh(starGeometry, starMaterial);
+  scene.add(starSphere);
+
+  // Simple star texture creation, or load a star texture if preferred
+  function createStarTexture() {
+    const c = document.createElement("canvas");
+    c.width = 512; c.height = 512;
+    const ctx = c.getContext("2d");
+    ctx.fillStyle = "black";
+    ctx.fillRect(0,0,512,512);
+    for(let i=0;i<400;i++){
+      const x = Math.random()*512, y = Math.random()*512;
+      ctx.fillStyle = "white";
+      ctx.fillRect(x,y,1,1);
+    }
+    return new THREE.CanvasTexture(c);
+  }
+})();
+
+// ----------------- Sun (Center) -----------------
+const sunRadius = 10; // We could exaggerate further; the real Sun is ~109 Earth radii
+const sunGeometry = new THREE.SphereGeometry(sunRadius, 32, 32);
+const sunMaterial = new THREE.MeshBasicMaterial({ color: 0xffcc33 });
+const sunMesh = new THREE.Mesh(sunGeometry, sunMaterial);
+scene.add(sunMesh);
+
+// ----------------- Planet Data (Approximate) -----------------
+// Distances in AU, eccentricities, orbital periods in years, radii in Earth radii
+// (Then scaled for comedic effect). Earth is 1 AU from Sun, radius=1 (then scaled).
+// The "distanceScale" below will turn 1 AU into 50 units in the scene.
+const distanceScale = 50;
+const radiusScale = 0.5; // Earth will appear at ~0.5 units in radius
+
+const planetParams = [
+  // name, semimajor axis (AU), eccentricity, orbitalPeriod (years), radius (relative to Earth)
+  // Mercury
+  { name: "Mercury", a: 0.39, e: 0.206, period: 0.24, radius: 0.38 },
+  // Venus
+  { name: "Venus", a: 0.72, e: 0.007, period: 0.62, radius: 0.95 },
+  // Earth
+  { name: "Earth", a: 1.00, e: 0.017, period: 1.00, radius: 1.00 },
+  // Mars
+  { name: "Mars", a: 1.52, e: 0.094, period: 1.88, radius: 0.53 },
+  // Jupiter
+  { name: "Jupiter", a: 5.20, e: 0.049, period: 11.86, radius: 11.21 },
+  // Saturn
+  { name: "Saturn", a: 9.55, e: 0.052, period: 29.46, radius: 9.45 },
+  // Uranus
+  { name: "Uranus", a: 19.2, e: 0.047, period: 84.01, radius: 4.01 },
+  // Neptune
+  { name: "Neptune", a: 30.06, e: 0.009, period: 164.8, radius: 3.88 }
+];
+
+// We'll make each year = 60 seconds of animation. Earth does one revolution in 60s.
+const yearInSeconds = 60;
+
+// Container arrays for reference in animation loop
+const planetMeshes = [];
+const orbitPaths = [];
+
+// Create each planet + orbit path
+planetParams.forEach(params => {
+  const { a, e, period, radius, name } = params;
+
+  // Scale for scene
+  const semiMajor = a * distanceScale;
+  const semiMinor = semiMajor * Math.sqrt(1 - e*e);
+  const planetRadius = radius * radiusScale;
+
+  // Planet
+  const geometry = new THREE.SphereGeometry(planetRadius, 24, 24);
+  const material = new THREE.MeshLambertMaterial({ color: getPlanetColor(name) });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.name = name;
+  scene.add(mesh);
+
+  // Orbit path: approximate ellipse shape
+  // We'll sample some points
+  const segments = 128;
+  const ellipsePoints = new THREE.Path();
+  for(let i=0; i<=segments; i++){
+    const theta = (i / segments) * Math.PI*2;
+    const x = semiMajor * Math.cos(theta);
+    const z = semiMinor * Math.sin(theta);
+    if(i===0) ellipsePoints.moveTo(x,z);
+    else ellipsePoints.lineTo(x,z);
+  }
+  const orbitShape = ellipsePoints.getPoints();
+  const orbitGeometry = new THREE.BufferGeometry().setFromPoints(orbitShape);
+  // Turn (x,z) => (x,0,z) in 3D
+  orbitGeometry.attributes.position.array.forEach((val, idx, arr)=>{
+    if(idx % 3 === 1) arr[idx] = 0; // y=0
+  });
+  const orbitMaterial = new THREE.LineBasicMaterial({ color: 0xaaaaaa });
+  const orbitLine = new THREE.LineLoop(orbitGeometry, orbitMaterial);
+  orbitLine.position.set(0,0,0);
+  scene.add(orbitLine);
+
+  // Store references
+  planetMeshes.push({
+    mesh, // the sphere mesh
+    semiMajor,
+    semiMinor,
+    eccentricity: e,
+    orbitalSeconds: period * yearInSeconds, // how many seconds for 1 revolution
+    // We set a random initial angle offset so they start at varied positions
+    angleOffset: Math.random()*Math.PI*2,
+    name
+  });
+  orbitPaths.push(orbitLine);
+});
+
+// Simple planet color helper
+function getPlanetColor(name) {
+  const palette = {
+    Mercury: 0xb5b5b5,
+    Venus: 0xd4af37,
+    Earth: 0x2266ff,
+    Mars: 0xff5533,
+    Jupiter: 0xf2e3b6,
+    Saturn: 0xd9c27f,
+    Uranus: 0x80ffff,
+    Neptune: 0x6688ff
+  };
+  return palette[name] || 0xffffff;
+}
+
+// ----------------- Timeline Slider for Speed -----------------
+let timeScale = 1.0;
+let elapsed = 0;  // in seconds of "solar-system time"
+const slider = document.getElementById("timeSlider");
+const speedLabel = document.getElementById("speedLabel");
+
+slider.addEventListener("input", () => {
+  timeScale = parseFloat(slider.value);
+  speedLabel.textContent = timeScale.toFixed(1);
+});
+
+// ----------------- Animation Loop -----------------
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+
+  const delta = clock.getDelta();
+  // Advance "solar-system time"
+  elapsed += delta * timeScale;
+
+  // Update each planet position
+  planetMeshes.forEach(planet => {
+    const fraction = ((elapsed + planet.angleOffset) / planet.orbitalSeconds) % (Math.PI*2);
+    // angle fraction is in [0..∞), but we only need 0..2π repeatedly
+    const angle = fraction * (2 * Math.PI / (2 * Math.PI)); // we can just use fraction, but this is explicit.
+    const x = planet.semiMajor * Math.cos(angle);
+    const z = planet.semiMinor * Math.sin(angle);
+    planet.mesh.position.set(x, 0, z);
+  });
+
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+animate();
+
+// ----------------- Handle Resizing -----------------
+window.addEventListener("resize", onWindowResize);
+function onWindowResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+</script>
+</body>
+</html>

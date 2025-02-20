@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Three.js Solar System Orrery</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        background-color: #000;
+      }
+      #ui {
+        position: absolute;
+        bottom: 20px;
+        width: 100%;
+        text-align: center;
+        font-family: sans-serif;
+        color: #fff;
+      }
+      #timeSlider {
+        width: 300px;
+        vertical-align: middle;
+      }
+      #playPause {
+        font-size: 16px;
+        vertical-align: middle;
+      }
+    </style>
+    <script async src="https://unpkg.com/es-module-shims@1.8.0/dist/es-module-shims.js"></script>
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+  </head>
+  <body>
+    <div id="ui">
+      <button id="playPause">Pause</button>
+      <input id="timeSlider" type="range" min="-500" max="500" step="0.01" value="0" />
+      <span id="timeDisplay">0.00 years</span>
+    </div>
+
+    <script type="module">
+      import * as THREE from 'three';
+      import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+      // === Scene Setup ===
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x000000);
+
+      const camera = new THREE.PerspectiveCamera(
+        45,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        10000
+      );
+      camera.position.set(0, 300, 600);
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.body.appendChild(renderer.domElement);
+
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.1;
+
+      scene.add(new THREE.AmbientLight(0x333333));
+      const sunLight = new THREE.PointLight(0xffffff, 1.5, 0, 2);
+      sunLight.position.set(0, 0, 0);
+      scene.add(sunLight);
+
+      const distanceScale = 50;
+      const planetSizeExaggeration = 1000;
+      const sunSizeExaggeration = 50;
+
+      const sunRadiusAU = 696340 / 149597870;
+      const sunRadius = sunRadiusAU * distanceScale * sunSizeExaggeration;
+      const sunGeometry = new THREE.SphereGeometry(sunRadius, 32, 32);
+      const sunMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+      const sunMesh = new THREE.Mesh(sunGeometry, sunMaterial);
+      scene.add(sunMesh);
+
+      const planets = [
+        {
+          name: 'Mercury',
+          a: 0.387,
+          e: 0.2056,
+          period: 0.2408,
+          radius: 2440,
+          color: 0xaaaaaa,
+        },
+        {
+          name: 'Venus',
+          a: 0.723,
+          e: 0.0068,
+          period: 0.615,
+          radius: 6052,
+          color: 0xffa500,
+        },
+        {
+          name: 'Earth',
+          a: 1.0,
+          e: 0.0167,
+          period: 1.0,
+          radius: 6371,
+          color: 0x3366ff,
+        },
+        {
+          name: 'Mars',
+          a: 1.524,
+          e: 0.0934,
+          period: 1.881,
+          radius: 3389,
+          color: 0xff3300,
+        },
+        {
+          name: 'Jupiter',
+          a: 5.203,
+          e: 0.0489,
+          period: 11.86,
+          radius: 69911,
+          color: 0xff8c00,
+        },
+        {
+          name: 'Saturn',
+          a: 9.537,
+          e: 0.0565,
+          period: 29.46,
+          radius: 58232,
+          color: 0xf5deb3,
+        },
+        {
+          name: 'Uranus',
+          a: 19.191,
+          e: 0.046,
+          period: 84,
+          radius: 25362,
+          color: 0x66ccff,
+        },
+        {
+          name: 'Neptune',
+          a: 30.07,
+          e: 0.009,
+          period: 164.8,
+          radius: 24622,
+          color: 0x1e90ff,
+        },
+      ];
+
+      planets.forEach((planet) => {
+        const planetRadiusAU = planet.radius / 149597870;
+        const scaledPlanetRadius =
+          planetRadiusAU * distanceScale * planetSizeExaggeration;
+
+        const geometry = new THREE.SphereGeometry(scaledPlanetRadius, 32, 32);
+        const material = new THREE.MeshPhongMaterial({ color: planet.color });
+        const mesh = new THREE.Mesh(geometry, material);
+        scene.add(mesh);
+        planet.mesh = mesh;
+
+        const orbitPoints = [];
+        const segments = 256;
+        for (let i = 0; i <= segments; i++) {
+          const E = (i / segments) * Math.PI * 2;
+          const x = planet.a * (Math.cos(E) - planet.e);
+          const y = planet.a * Math.sqrt(1 - planet.e * planet.e) * Math.sin(E);
+          orbitPoints.push(new THREE.Vector3(x * distanceScale, 0, y * distanceScale));
+        }
+        const orbitGeometry = new THREE.BufferGeometry().setFromPoints(orbitPoints);
+        const orbitMaterial = new THREE.LineBasicMaterial({
+          color: 0xffffff,
+          opacity: 0.5,
+          transparent: true,
+        });
+        const orbitLine = new THREE.Line(orbitGeometry, orbitMaterial);
+        scene.add(orbitLine);
+        planet.orbitLine = orbitLine;
+      });
+
+      function solveKepler(M, e) {
+        let E = M;
+        const EPS = 1e-6;
+        for (let i = 0; i < 10; i++) {
+          const delta = (E - e * Math.sin(E) - M) / (1 - e * Math.cos(E));
+          E = E - delta;
+          if (Math.abs(delta) < EPS) break;
+        }
+        return E;
+      }
+
+      let simulationTime = 0;
+      const simulationSpeed = 0.1;
+      let playing = true;
+      let lastTime = performance.now();
+
+      const timeSlider = document.getElementById("timeSlider");
+      const timeDisplay = document.getElementById("timeDisplay");
+      const playPauseButton = document.getElementById("playPause");
+
+      timeSlider.addEventListener("input", function () {
+        simulationTime = parseFloat(this.value);
+        playing = false;
+        playPauseButton.textContent = "Play";
+      });
+
+      playPauseButton.addEventListener("click", function () {
+        playing = !playing;
+        this.textContent = playing ? "Pause" : "Play";
+        lastTime = performance.now();
+      });
+
+      function animate() {
+        requestAnimationFrame(animate);
+        const now = performance.now();
+        const dt = (now - lastTime) / 1000;
+        lastTime = now;
+
+        if (playing) {
+          simulationTime += dt * simulationSpeed;
+          timeSlider.value = simulationTime;
+        }
+        timeDisplay.textContent = simulationTime.toFixed(2) + " years";
+
+        planets.forEach((planet) => {
+          const fraction = (simulationTime / planet.period) - Math.floor(simulationTime / planet.period);
+          const M = fraction * 2 * Math.PI;
+          const E = solveKepler(M, planet.e);
+          const x = planet.a * (Math.cos(E) - planet.e);
+          const y = planet.a * Math.sqrt(1 - planet.e * planet.e) * Math.sin(E);
+          planet.mesh.position.set(x * distanceScale, 0, y * distanceScale);
+        });
+
+        controls.update();
+        renderer.render(scene, camera);
+      }
+      animate();
+
+      window.addEventListener("resize", function () {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+    </script>
+  </body>
+</html>

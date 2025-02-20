@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Voice Visualizer</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #000;
+            color: #fff;
+            font-family: Arial, sans-serif;
+        }
+        #startButton {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 15px 30px;
+            font-size: 18px;
+            background: #00ff00;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            z-index: 2;
+        }
+        #startButton:hover {
+            background: #00cc00;
+        }
+        #menu {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 1;
+            display: none;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+        }
+        #menu label, #menu select, #menu input {
+            display: block;
+            margin: 5px 0;
+            color: #fff;
+        }
+        #menu select, #menu input[type="range"] {
+            width: 100%;
+            background: #333;
+            color: #fff;
+        }
+    </style>
+</head>
+<body>
+    <button id="startButton">Start Visualization</button>
+    <div id="menu">
+        <label for="modeSelect">Visualization Mode:</label>
+        <select id="modeSelect">
+            <option value="bar">Bar Graph</option>
+            <option value="radial">Radial</option>
+            <option value="waveform">Waveform</option>
+        </select>
+        <label for="colorScheme">Color Scheme:</label>
+        <select id="colorScheme">
+            <option value="rainbow">Rainbow</option>
+            <option value="mono">Monochrome</option>
+            <option value="fire">Fire</option>
+        </select>
+        <label for="sensitivity">Sensitivity: <span id="sensitivityValue">1.0</span></label>
+        <input type="range" id="sensitivity" min="0.5" max="2.0" step="0.1" value="1.0">
+        <label for="cameraOrbit">Camera Orbit:</label>
+        <select id="cameraOrbit">
+            <option value="on">On</option>
+            <option value="off">Off</option>
+        </select>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        const startButton = document.getElementById('startButton');
+        const menu = document.getElementById('menu');
+        const modeSelect = document.getElementById('modeSelect');
+        const colorSchemeSelect = document.getElementById('colorScheme');
+        const sensitivitySlider = document.getElementById('sensitivity');
+        const sensitivityValue = document.getElementById('sensitivityValue');
+        const cameraOrbitSelect = document.getElementById('cameraOrbit');
+        let audioCtx, analyser, dataArray, bufferLength;
+        let scene, camera, renderer;
+        let barGroup, radialGroup, waveformGroup;
+        let currentGroup, currentMode = 'bar';
+        let colorScheme = 'rainbow', sensitivity = 1.0, cameraOrbit = 'on';
+        let time = 0;
+
+        startButton.addEventListener('click', () => {
+            startButton.style.display = 'none';
+            menu.style.display = 'block';
+            startAudio();
+        });
+
+        modeSelect.addEventListener('change', (e) => {
+            switchMode(e.target.value);
+        });
+
+        colorSchemeSelect.addEventListener('change', (e) => {
+            colorScheme = e.target.value;
+            updateColors();
+        });
+
+        sensitivitySlider.addEventListener('input', (e) => {
+            sensitivity = parseFloat(e.target.value);
+            sensitivityValue.textContent = sensitivity.toFixed(1);
+        });
+
+        cameraOrbitSelect.addEventListener('change', (e) => {
+            cameraOrbit = e.target.value;
+        });
+
+        function startAudio() {
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(stream => {
+                    audioCtx = new AudioContext();
+                    const source = audioCtx.createMediaStreamSource(stream);
+                    analyser = audioCtx.createAnalyser();
+                    analyser.fftSize = 256;
+                    bufferLength = analyser.frequencyBinCount;
+                    dataArray = new Uint8Array(bufferLength);
+                    source.connect(analyser);
+                    setupThreeJS();
+                    createVisualizations();
+                    scene.add(barGroup);
+                    currentGroup = barGroup;
+                    animate();
+                })
+                .catch(err => {
+                    console.error('Error accessing microphone:', err);
+                    alert('Could not access your microphone. Please allow access and reload.');
+                });
+        }
+
+        function setupThreeJS() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 5, 10);
+            camera.lookAt(0, 0, 0);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+            const ambientLight = new THREE.AmbientLight(0x404040);
+            scene.add(ambientLight);
+            const pointLight = new THREE.PointLight(0xffffff, 1);
+            pointLight.position.set(10, 10, 10);
+            scene.add(pointLight);
+        }
+
+        function createBarGraph() {
+            const group = new THREE.Group();
+            const numBars = bufferLength;
+            const spacing = 0.5;
+            const startX = - (numBars * spacing) / 2;
+            for (let i = 0; i < numBars; i++) {
+                const geometry = new THREE.BoxGeometry(0.4, 1, 0.4);
+                const material = new THREE.MeshPhongMaterial({ color: 0xffffff });
+                const cube = new THREE.Mesh(geometry, material);
+                cube.position.set(startX + i * spacing, 0.5, 0);
+                group.add(cube);
+            }
+            updateColors(group);
+            return group;
+        }
+
+        function createRadialGraph() {
+            const group = new THREE.Group();
+            const numBars = bufferLength;
+            const radius = 5;
+            for (let i = 0; i < numBars; i++) {
+                const angle = (i / numBars) * Math.PI * 2;
+                const x = radius * Math.cos(angle);
+                const z = radius * Math.sin(angle);
+                const geometry = new THREE.SphereGeometry(0.2, 16, 16);
+                const material = new THREE.MeshPhongMaterial({ color: 0xffffff });
+                const sphere = new THREE.Mesh(geometry, material);
+                sphere.position.set(x, 0, z);
+                group.add(sphere);
+            }
+            updateColors(group);
+            return group;
+        }
+
+        function createWaveform() {
+            const numPoints = bufferLength;
+            const positions = new Float32Array(numPoints * 3);
+            const spacing = 0.1;
+            const startX = - (numPoints * spacing) / 2;
+            for (let i = 0; i < numPoints; i++) {
+                positions[i * 3] = startX + i * spacing;
+                positions[i * 3 + 1] = 0;
+                positions[i * 3 + 2] = 0;
+            }
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            const material = new THREE.LineBasicMaterial({ color: 0xffffff });
+            const line = new THREE.Line(geometry, material);
+            updateColors(line);
+            return line;
+        }
+
+        function createVisualizations() {
+            barGroup = createBarGraph();
+            radialGroup = createRadialGraph();
+            waveformGroup = createWaveform();
+        }
+
+        function switchMode(newMode) {
+            scene.remove(currentGroup);
+            if (newMode === 'bar') currentGroup = barGroup;
+            else if (newMode === 'radial') currentGroup = radialGroup;
+            else if (newMode === 'waveform') currentGroup = waveformGroup;
+            scene.add(currentGroup);
+            currentMode = newMode;
+        }
+
+        function updateColors(group = currentGroup) {
+            if (!group) return;
+            const children = group.children || [group];
+            children.forEach((obj, i) => {
+                let color;
+                if (colorScheme === 'rainbow') {
+                    const hue = (i / bufferLength) * 360;
+                    color = new THREE.Color(`hsl(${hue}, 100%, 50%)`);
+                } else if (colorScheme === 'mono') {
+                    color = new THREE.Color(0x00ff00);
+                } else if (colorScheme === 'fire') {
+                    const intensity = i / bufferLength;
+                    color = new THREE.Color(intensity, intensity * 0.5, 0);
+                }
+                obj.material.color.set(color);
+            });
+        }
+
+        function updateVisualization() {
+            if (!analyser) return;
+            if (currentMode === 'waveform') {
+                analyser.getByteTimeDomainData(dataArray);
+                const positions = waveformGroup.geometry.attributes.position.array;
+                dataArray.forEach((value, i) => {
+                    positions[i * 3 + 1] = (value - 128) / 128 * 2 * sensitivity;
+                });
+                waveformGroup.geometry.attributes.position.needsUpdate = true;
+            } else {
+                analyser.getByteFrequencyData(dataArray);
+                currentGroup.children.forEach((obj, i) => {
+                    const value = (dataArray[i] / 255) * sensitivity;
+                    if (currentMode === 'bar') {
+                        obj.scale.y = Math.max(0.1, value * 5);
+                    } else if (currentMode === 'radial') {
+                        const baseRadius = 5;
+                        const radius = baseRadius + value * 2;
+                        const angle = (i / bufferLength) * Math.PI * 2;
+                        obj.position.set(radius * Math.cos(angle), 0, radius * Math.sin(angle));
+                    }
+                });
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (cameraOrbit === 'on') {
+                time += 0.01;
+                camera.position.x = Math.sin(time) * 10;
+                camera.position.z = Math.cos(time) * 10;
+                camera.lookAt(0, 0, 0);
+            }
+            updateVisualization();
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
